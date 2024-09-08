@@ -30,53 +30,70 @@ def multi_scale_retinex(img, scales=[15, 80, 250]):
         msr_result += single_scale_retinex(img, sigma)
     return msr_result / len(scales)
 
+def resize_image(image, width, height):
+    image = Image.fromarray(image)
+    return image.resize((width, height))
+
+
 def main():
-    
-    # Streamlit App
-    st.title("Chandrayaan 2 OHRC Lunar Crater Dataset Enhancer")
+    st.title("Image Enhancement Comparison")
 
-    # Sidebar for selecting options
-    st.sidebar.title("Enhancement Options")
-    enhancement_type = st.sidebar.selectbox("Choose Enhancement Type", ("Gamma Correction", "CLAHE", "Multi-Scale Retinex"))
+    # File uploader
+    uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
-    # Sidebar parameters for each enhancement
-    if enhancement_type == "Gamma Correction":
-        gamma_value = st.sidebar.slider("Gamma Value", 0.1, 3.0, 1.0)
-
-    elif enhancement_type == "CLAHE":
-        clip_limit = st.sidebar.slider("CLAHE Clip Limit", 1.0, 4.0, 2.0)
-        tile_grid_size = st.sidebar.slider("Tile Grid Size", 4, 16, 8)
-
-    elif enhancement_type == "Multi-Scale Retinex":
-        scales = st.sidebar.multiselect("Retinex Scales", [15, 80, 250], default=[15, 80, 250])
-
-    # File uploader for the image
-    uploaded_file = st.file_uploader("Upload an image from the dataset", type=["jpg", "jpeg", "png"])
+    # Sidebar parameters
+    gamma_value = st.sidebar.slider("Gamma", 0.1, 3.0, 1.0)
+    clip_limit = st.sidebar.slider("CLAHE Clip Limit", 0.1, 10.0, 2.0)
+    tile_grid_size = st.sidebar.slider("CLAHE Tile Grid Size", 1, 16, 8)
+    scales = st.sidebar.multiselect("Multi-Scale Retinex Scales", [15, 80, 250], default=[15, 80, 250])
 
     if uploaded_file is not None:
         # Convert the uploaded file to a numpy array
         image = np.array(Image.open(uploaded_file))
+        
         original_image = image.copy()
 
+        # Show the original image in the first column
         st.image(original_image, caption="Original Image", use_column_width=True)
 
-        if st.sidebar.button("Enhance"):
-            if enhancement_type == "Gamma Correction":
-                enhanced_image = adjust_gamma(image, gamma=gamma_value)
-            elif enhancement_type == "CLAHE":
-                enhanced_image = apply_clahe(image, clip_limit=clip_limit, tile_grid_size=(tile_grid_size, tile_grid_size))
-            elif enhancement_type == "Multi-Scale Retinex":
-                enhanced_image = multi_scale_retinex(image.astype(np.float32), scales=scales)
-                enhanced_image = cv2.normalize(enhanced_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        # Apply enhancements and show results side by side
+        if st.button("Enhance"):
+            # Enhance using all techniques
+            gamma_corrected = adjust_gamma(image, gamma=gamma_value)
+            clahe_image = apply_clahe(image, clip_limit=clip_limit, tile_grid_size=(tile_grid_size, tile_grid_size))
+            msr_image = multi_scale_retinex(image.astype(np.float32), scales=scales)
+            msr_image = cv2.normalize(msr_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-            # Display the enhanced image
-            st.image(enhanced_image, caption=f"Enhanced Image - {enhancement_type}", use_column_width=True)
+            # Display the images side by side using st.columns
+            col1, col2 = st.columns(2)
+            height, width = original_image.shape[:2]
+            with col1:
+                
+                st.image(resize_image(original_image, width, height), caption="Original Image", use_column_width=True)
+                st.image(resize_image(gamma_corrected, width, height), caption="Gamma Correction", use_column_width=True)
+            with col2:
+                st.image(resize_image(clahe_image, width, height), caption="CLAHE", use_column_width=True)
+                st.image(resize_image(msr_image, width, height), caption="Multi-Scale Retinex", use_column_width=True)
 
-            # Allow user to download the enhanced image
+            # Allow user to download any enhanced image
             st.sidebar.download_button(
-                label="Download Enhanced Image",
-                data=cv2.imencode('.jpg', enhanced_image)[1].tobytes(),
-                file_name='enhanced_image.jpg',
+                label="Download Gamma Corrected Image",
+                data=cv2.imencode('.jpg', gamma_corrected)[1].tobytes(),
+                file_name='gamma_corrected.jpg',
+                mime='image/jpeg'
+            )
+
+            st.sidebar.download_button(
+                label="Download CLAHE Image",
+                data=cv2.imencode('.jpg', clahe_image)[1].tobytes(),
+                file_name='clahe_image.jpg',
+                mime='image/jpeg'
+            )
+
+            st.sidebar.download_button(
+                label="Download MSR Image",
+                data=cv2.imencode('.jpg', msr_image)[1].tobytes(),
+                file_name='msr_image.jpg',
                 mime='image/jpeg'
             )
 
