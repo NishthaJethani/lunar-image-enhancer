@@ -108,6 +108,10 @@ def main():
             'params': {}
         })
 
+    # Function to remove a technique from the sequence
+    def remove_technique(index):
+        del st.session_state.techniques[index]
+
     # Sidebar to manage techniques
     with st.sidebar:
         st.header("Add New Technique")
@@ -134,6 +138,7 @@ def main():
                         technique['params']['high_freq'] = st.slider(f"High Frequency for Technique {i + 1}", 1.0, 2.0, 1.5)
                         technique['params']['gamma_h'] = st.slider(f"Gamma High for Technique {i + 1}", 1.0, 3.0, 1.5)
                         technique['params']['gamma_l'] = st.slider(f"Gamma Low for Technique {i + 1}", 0.1, 1.0, 0.5)
+                    st.button(f"Remove Technique {i + 1}", key=f"remove_{i}", on_click=remove_technique, args=(i,))
 
     if uploaded_file is not None:
         image = np.array(Image.open(uploaded_file))
@@ -141,10 +146,8 @@ def main():
 
         if not st.button("Apply Enhancements and Compare"):
             st.image(original_image, caption="Original Image", use_column_width=True)
-
         else:
             enhanced_image = apply_enhancements(image.copy(), [t['type'] for t in st.session_state.techniques], [t['params'] for t in st.session_state.techniques])
-
             compare_image(original_image, enhanced_image, label1="Original", label2="Enhanced")
 
             # Allow downloading the enhanced image
