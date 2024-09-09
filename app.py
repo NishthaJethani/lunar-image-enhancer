@@ -81,6 +81,8 @@ def apply_enhancements(image, sequence, params):
 
 def compare_image(img1, img2, label1="Original", label2="Enhanced"):
     st.markdown(f"### Comparison between {label1} and {label2}")
+    
+    # Use streamlit-image-comparison to display the original and enhanced images side by side
     image_comparison(
         img1=img1,
         img2=img2,
@@ -137,13 +139,12 @@ def main():
         image = np.array(Image.open(uploaded_file))
         original_image = image.copy()
 
-        # Combine Apply and Compare functionalities into one button
-        if st.button("Apply Enhancements and Compare"):
+        if not st.button("Apply Enhancements and Compare"):
+            st.image(original_image, caption="Original Image", use_column_width=True)
+
+        else:
             enhanced_image = apply_enhancements(image.copy(), [t['type'] for t in st.session_state.techniques], [t['params'] for t in st.session_state.techniques])
 
-            # Store the enhanced image in session state for later use in comparison
-            st.session_state.enhanced_image = enhanced_image
-            
             compare_image(original_image, enhanced_image, label1="Original", label2="Enhanced")
 
             # Allow downloading the enhanced image
