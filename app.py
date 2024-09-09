@@ -1,8 +1,13 @@
-import streamlit as st
 import cv2
 import numpy as np
+import os
 from PIL import Image
-from streamlit_image_comparison import image_comparison
+import matplotlib.pyplot as plt
+from itertools import permutations
+import time
+import streamlit as st
+
+# Define the enhancement functions as before
 
 # Function to apply gamma correction
 def adjust_gamma(image, gamma=1.0):
@@ -60,103 +65,120 @@ def apply_homomorphic_filtering(roi, low_freq=0.3, high_freq=1.5, gamma_h=1.5, g
     enhanced_roi = cv2.merge(enhanced_channels)
     return enhanced_roi
 
-def apply_enhancements(image, sequence, params):
-    for i, technique in enumerate(sequence):
-        if technique == "Gamma Correction":
-            image = adjust_gamma(image, gamma=params[i]["gamma"])
-        elif technique == "CLAHE":
-            image = apply_clahe(image, clip_limit=params[i]["clip_limit"],
-                                tile_grid_size=(params[i]["tile_grid_size"], params[i]["tile_grid_size"]))
-        elif technique == "Multi-Scale Retinex":
-            msr_image = multi_scale_retinex(image.astype(np.float32), scales=params[i]["scales"])
-            image = cv2.normalize(msr_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        elif technique == "Shading-Based Enhancement":
-            image = shading_based_enhancement(image, filter_size=params[i]["filter_size"])
-        elif technique == "Homomorphic Filtering":
-            image = apply_homomorphic_filtering(image, low_freq=params[i]["low_freq"],
-                                                high_freq=params[i]["high_freq"],
-                                                gamma_h=params[i]["gamma_h"],
-                                                gamma_l=params[i]["gamma_l"])
-    return image
+def resize_image(image, width, height):
+    image = Image.fromarray(image)
+    return image.resize((width, height))
 
-def compare_image(img1, img2, label1="Original", label2="Enhanced"):
-    st.markdown(f"### Comparison between {label1} and {label2}")
+def save_permutations(image):
+    techniques = [
+        ('Gamma Correction', lambda img: adjust_gamma(img, gamma=1.0)),
+        ('CLAHE', lambda img: apply_clahe(img, clip_limit=2.0, tile_grid_size=(8, 8))),
+        ('MSR', lambda img: multi_scale_retinex(img.astype(np.float32), scales=[15, 80, 250])),
+        ('Shading', lambda img: shading_based_enhancement(img)),
+        ('Homomorphic', lambda img: apply_homomorphic_filtering(img))
+    ]
+
+    # Create a directory to save images if it doesn't exist
+    output_dir = os.path.abspath('enhanced_images')
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Get signal and noise regions of the original image
+    original_signal = get_signal_region(image)
+    original_noise = get_noise_region(image)
+
+    # Calculate SNR for the original image
+    original_snr = calculate_snr(original_signal, original_noise)
+    print(f"SNR for Original Image: {original_snr:.2f} dB")
+
+    # Generate permutations and calculate SNR for each enhanced image
+    for r in range(1, 6):  # Change the range depending on the number of techniques
+        for perm in permutations(techniques, r):
+            temp_image = image.copy()
+            sequence = []
+
+            try:
+                for technique_name, technique_func in perm:
+                    temp_image = technique_func(temp_image)
+                    sequence.append(technique_name)
+
+                # Get signal and noise regions for the enhanced image
+                enhanced_signal = get_signal_region(temp_image)
+                enhanced_noise = get_noise_region(temp_image)
+
+                # Calculate SNR for the enhanced image
+                enhanced_snr = calculate_snr(enhanced_signal, enhanced_noise)
+                result_key = '_'.join(sequence)
+
+                # Normalize the image to [0, 255] if needed
+                if temp_image.max() > 1.0:
+                    temp_image = np.clip(temp_image, 0, 255).astype(np.uint8)
+
+                # Save the image with SNR in the title
+                filename = os.path.join(output_dir, f"enhanced_{r}techniques_{result_key}_SNR_{enhanced_snr:.2f}dB.jpg").replace('\\', '/')
+                success = cv2.imwrite(filename, temp_image)
+                if success:
+                    print(f"Image successfully saved at {filename} with SNR: {enhanced_snr:.2f} dB")
+                else:
+                    print(f"Failed to save image at {filename}")
+
+            except Exception as e:
+                print(f"Error applying sequence {' -> '.join(sequence)}: {e}")
+                continue
+
+def get_signal_region(image):
+    blurred = cv2.GaussianBlur(image, (5, 5), 0)
+    edges = cv2.Canny(blurred, 100, 200)
+    signal_region = image[edges > 0]
+    return signal_region
+
+
+def get_noise_region(image):
+    if len(image.shape) == 3:  # If the image has 3 channels (RGB)
+        grayscale_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        grayscale_image = image  # Image is already grayscale
     
-    # Use streamlit-image-comparison to display the original and enhanced images side by side
-    image_comparison(
-        img1=img1,
-        img2=img2,
-        label1=label1,
-        label2=label2
-    )
+    threshold_value, noise_mask = cv2.threshold(grayscale_image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    noise_region = grayscale_image[noise_mask > 0]
+    
+    return noise_region
 
-# Streamlit App
+
+def calculate_snr(signal_roi, noise_roi):
+    mean_signal = np.mean(signal_roi)
+    std_noise = np.std(noise_roi)
+    if std_noise == 0:  # Avoid division by zero
+        return float('inf')
+    
+    snr = mean_signal / std_noise
+    return snr
+
+
+
 def main():
-    st.title("Lunar Image Enhancement")
+    st.title("Image Enhancement and SNR Calculation")
 
     # File uploader
     uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
-    # List to store the sequence of applied techniques
-    if 'techniques' not in st.session_state:
-        st.session_state.techniques = []
-
-    # Function to add a new technique to the sequence
-    def add_technique():
-        st.session_state.techniques.append({
-            'type': st.session_state.selected_technique,
-            'params': {}
-        })
-
-    # Function to remove a technique from the sequence
-    def remove_technique(index):
-        del st.session_state.techniques[index]
-
-    # Sidebar to manage techniques
-    with st.sidebar:
-        st.header("Add New Technique")
-        st.selectbox("Select Technique", ["None", "Gamma Correction", "CLAHE", "Multi-Scale Retinex", "Shading-Based Enhancement", "Homomorphic Filtering"], key="selected_technique")
-        st.button("Add Technique", on_click=add_technique)
-
-        # Display and edit existing techniques
-        if st.session_state.techniques:
-            st.header("Current Techniques")
-            for i, technique in enumerate(st.session_state.techniques):
-                with st.expander(f"Technique {i + 1}", expanded=True):
-                    st.write(f"Type: {technique['type']}")
-                    if technique['type'] == "Gamma Correction":
-                        technique['params']['gamma'] = st.slider(f"Gamma for Technique {i + 1}", 0.1, 3.0, 1.0)
-                    elif technique['type'] == "CLAHE":
-                        technique['params']['clip_limit'] = st.slider(f"CLAHE Clip Limit for Technique {i + 1}", 0.1, 10.0, 2.0)
-                        technique['params']['tile_grid_size'] = st.slider(f"CLAHE Tile Grid Size for Technique {i + 1}", 1, 16, 8)
-                    elif technique['type'] == "Multi-Scale Retinex":
-                        technique['params']['scales'] = st.multiselect(f"MSR Scales for Technique {i + 1}", [15, 80, 250], default=[15, 80, 250])
-                    elif technique['type'] == "Shading-Based Enhancement":
-                        technique['params']['filter_size'] = st.slider(f"Filter Size for Technique {i + 1}", 1, 100, 45)
-                    elif technique['type'] == "Homomorphic Filtering":
-                        technique['params']['low_freq'] = st.slider(f"Low Frequency for Technique {i + 1}", 0.1, 1.0, 0.3)
-                        technique['params']['high_freq'] = st.slider(f"High Frequency for Technique {i + 1}", 1.0, 2.0, 1.5)
-                        technique['params']['gamma_h'] = st.slider(f"Gamma High for Technique {i + 1}", 1.0, 3.0, 1.5)
-                        technique['params']['gamma_l'] = st.slider(f"Gamma Low for Technique {i + 1}", 0.1, 1.0, 0.5)
-                    st.button(f"Remove Technique {i + 1}", key=f"remove_{i}", on_click=remove_technique, args=(i,))
-
     if uploaded_file is not None:
         image = np.array(Image.open(uploaded_file))
-        original_image = image.copy()
+        st.image(image, caption="Original Image", use_column_width=True)
 
-        if not st.button("Apply Enhancements and Compare"):
-            st.image(original_image, caption="Original Image", use_column_width=True)
-        else:
-            enhanced_image = apply_enhancements(image.copy(), [t['type'] for t in st.session_state.techniques], [t['params'] for t in st.session_state.techniques])
-            compare_image(original_image, enhanced_image, label1="Original", label2="Enhanced")
+        # SNR for the original image
+        original_signal = get_signal_region(image)
+        original_noise = get_noise_region(image)
+        original_snr = calculate_snr(original_signal, original_noise)
+        st.write(f"SNR for Original Image: {original_snr:.2f} dB")
 
-            # Allow downloading the enhanced image
-            st.sidebar.download_button(
-                label="Download Enhanced Image",
-                data=cv2.imencode('.jpg', enhanced_image)[1].tobytes(),
-                file_name='enhanced_image.jpg',
-                mime='image/jpeg'
-            )
+        # Button to start processing
+        if st.button("Apply All Permutations"):
+            with st.spinner('Processing...'):
+                save_permutations(image)  # Save images and display SNR
+                st.success('All permutations processed and saved!')
+
 
 if __name__ == "__main__":
     main()
