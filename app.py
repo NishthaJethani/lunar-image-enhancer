@@ -1,9 +1,9 @@
 import streamlit as st
 import cv2
 import numpy as np
-import os
 from PIL import Image
-import matplotlib.pyplot as plt
+from streamlit_image_comparison import image_comparison
+
 # Function to apply gamma correction
 def adjust_gamma(image, gamma=1.0):
     inv_gamma = 1.0 / gamma
@@ -60,11 +60,6 @@ def apply_homomorphic_filtering(roi, low_freq=0.3, high_freq=1.5, gamma_h=1.5, g
     enhanced_roi = cv2.merge(enhanced_channels)
     return enhanced_roi
 
-def resize_image(image, width, height):
-    image = Image.fromarray(image)
-    return image.resize((width, height))
-
-
 def apply_enhancements(image, sequence, params):
     for i, technique in enumerate(sequence):
         if technique == "Gamma Correction":
@@ -83,6 +78,15 @@ def apply_enhancements(image, sequence, params):
                                                 gamma_h=params[i]["gamma_h"],
                                                 gamma_l=params[i]["gamma_l"])
     return image
+
+def compare_image(img1, img2, label1="Original", label2="Enhanced"):
+    st.markdown(f"### Comparison between {label1} and {label2}")
+    image_comparison(
+        img1=img1,
+        img2=img2,
+        label1=label1,
+        label2=label2
+    )
 
 # Streamlit App
 def main():
@@ -133,25 +137,16 @@ def main():
         image = np.array(Image.open(uploaded_file))
         original_image = image.copy()
 
-        st.image(original_image, caption="Original Image", use_column_width=True)
+        # Combine Apply and Compare functionalities into one button
+        if st.button("Apply Enhancements and Compare"):
+            enhanced_image = apply_enhancements(image.copy(), [t['type'] for t in st.session_state.techniques], [t['params'] for t in st.session_state.techniques])
 
-        if st.button("Apply Enhancements"):
-            enhanced_image = image.copy()
+            # Store the enhanced image in session state for later use in comparison
+            st.session_state.enhanced_image = enhanced_image
+            
+            compare_image(original_image, enhanced_image, label1="Original", label2="Enhanced")
 
-            for technique in st.session_state.techniques:
-                if technique['type'] == "Gamma Correction":
-                    enhanced_image = adjust_gamma(enhanced_image, gamma=technique['params']['gamma'])
-                elif technique['type'] == "CLAHE":
-                    enhanced_image = apply_clahe(enhanced_image, clip_limit=technique['params']['clip_limit'], tile_grid_size=(technique['params']['tile_grid_size'], technique['params']['tile_grid_size']))
-                elif technique['type'] == "Multi-Scale Retinex":
-                    msr_image = multi_scale_retinex(enhanced_image.astype(np.float32), scales=technique['params']['scales'])
-                    enhanced_image = cv2.normalize(msr_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-                elif technique['type'] == "Shading-Based Enhancement":
-                    enhanced_image = shading_based_enhancement(enhanced_image, filter_size=technique['params']['filter_size'])
-                elif technique['type'] == "Homomorphic Filtering":
-                    enhanced_image = apply_homomorphic_filtering(enhanced_image, low_freq=technique['params']['low_freq'], high_freq=technique['params']['high_freq'], gamma_h=technique['params']['gamma_h'], gamma_l=technique['params']['gamma_l'])
-
-            st.image(enhanced_image, caption="Enhanced Image", use_column_width=True)
+            # Allow downloading the enhanced image
             st.sidebar.download_button(
                 label="Download Enhanced Image",
                 data=cv2.imencode('.jpg', enhanced_image)[1].tobytes(),
