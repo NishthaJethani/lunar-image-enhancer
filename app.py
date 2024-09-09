@@ -79,9 +79,47 @@ def apply_enhancements(image, sequence, params):
                                                 gamma_l=params[i]["gamma_l"])
     return image
 
+def get_signal_region(image):
+    blurred = cv2.GaussianBlur(image, (5, 5), 0)
+    edges = cv2.Canny(blurred, 100, 200)
+    signal_region = image[edges > 0]
+    return signal_region
+
+def get_noise_region(image):
+    if len(image.shape) == 3:  # If the image has 3 channels (RGB)
+        grayscale_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        grayscale_image = image  # Image is already grayscale
+    
+    threshold_value, noise_mask = cv2.threshold(grayscale_image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    noise_region = grayscale_image[noise_mask > 0]
+    
+    return noise_region
+
+
+def calculate_snr(signal_roi, noise_roi):
+    mean_signal = np.mean(signal_roi)
+    std_noise = np.std(noise_roi)
+    snr = mean_signal / std_noise
+    return snr
+
+
 def compare_image(img1, img2, label1="Original", label2="Enhanced"):
     st.markdown(f"### Comparison between {label1} and {label2}")
     
+    # SNR Calculation for original and enhanced images
+    signal_region_img1 = get_signal_region(img1)
+    noise_region_img1 = get_noise_region(img1)
+    snr_img1 = calculate_snr(signal_region_img1, noise_region_img1)
+    
+    signal_region_img2 = get_signal_region(img2)
+    noise_region_img2 = get_noise_region(img2)
+    snr_img2 = calculate_snr(signal_region_img2, noise_region_img2)
+
+    # Display SNR comparison
+    st.write(f"SNR of {label1}: {snr_img1:.2f}")
+    st.write(f"SNR of {label2}: {snr_img2:.2f}")
+
     # Use streamlit-image-comparison to display the original and enhanced images side by side
     image_comparison(
         img1=img1,
