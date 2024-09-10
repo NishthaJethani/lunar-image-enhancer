@@ -242,13 +242,11 @@ def main():
             enhanced_image = apply_enhancements(image.copy(), [t['type'] for t in st.session_state.techniques], [t['params'] for t in st.session_state.techniques])
             snr1 = return_snr(original_image)
             snr2 = return_snr(enhanced_image)
-            st.write(f"Original {snr1:.2f}")
-            st.write(f"Enhanced {snr2:.2f}")
             image_comparison(
                 img1=original_image,
                 img2=enhanced_image,
-                label1="Original",
-                label2="Enhanced"
+                label1=f"Original SNR {snr1:.2f}",
+                label2=f"Enhanced SNR{snr2:.2f}"
             )
             # Allow downloading the enhanced image
             st.sidebar.download_button(
