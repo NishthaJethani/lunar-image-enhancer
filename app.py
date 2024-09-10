@@ -5,7 +5,7 @@ from PIL import Image
 from streamlit_image_comparison import image_comparison
 
 # Function to apply gamma correction
-def adjust_gamma(image, gamma=1.0):
+def adjust_gamma(image, gamma=1.5):
     inv_gamma = 1.0 / gamma
     table = np.array([(i / 255.0) ** inv_gamma * 255 for i in range(256)]).astype("uint8")
     return cv2.LUT(image, table)
@@ -103,30 +103,20 @@ def calculate_snr(signal_roi, noise_roi):
     snr = mean_signal / std_noise
     return snr
 
+def resize_image(image, width, height):
+    image = Image.fromarray(image)
+    return image.resize((width, height))
 
-def compare_image(img1, img2, label1="Original", label2="Enhanced"):
-    st.markdown(f"### Comparison between {label1} and {label2}")
+
+
+def return_snr(img1):
     
     # SNR Calculation for original and enhanced images
     signal_region_img1 = get_signal_region(img1)
     noise_region_img1 = get_noise_region(img1)
     snr_img1 = calculate_snr(signal_region_img1, noise_region_img1)
-    
-    signal_region_img2 = get_signal_region(img2)
-    noise_region_img2 = get_noise_region(img2)
-    snr_img2 = calculate_snr(signal_region_img2, noise_region_img2)
 
-    # Display SNR comparison
-    st.write(f"SNR of {label1}: {snr_img1:.2f}")
-    st.write(f"SNR of {label2}: {snr_img2:.2f}")
-
-    # Use streamlit-image-comparison to display the original and enhanced images side by side
-    image_comparison(
-        img1=img1,
-        img2=img2,
-        label1=label1,
-        label2=label2
-    )
+    return snr_img1
 
 # Streamlit App
 def main():
@@ -183,11 +173,83 @@ def main():
         original_image = image.copy()
 
         if not st.button("Apply Enhancements and Compare"):
-            st.image(original_image, caption="Original Image", use_column_width=True)
+            gamma_corrected = adjust_gamma(image)
+            clahe_image = apply_clahe(image)
+            msr_image = multi_scale_retinex(image.astype(np.float32))
+            msr_image = cv2.normalize(msr_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            shading_enhanced = shading_based_enhancement(image)
+            homomorphic_enhanced = apply_homomorphic_filtering(image)
+
+            # Get image dimensions
+            height, width = original_image.shape[:2]
+            # Display the images side by side using st.columns
+            col1, col2 = st.columns(2)
+            height, width = original_image.shape[:2]
+            with col1:
+                snr_gamma = return_snr(gamma_corrected)
+                snr_org = return_snr(original_image)
+                snr_shading = return_snr(shading_enhanced)
+                st.image(resize_image(original_image, width, height), caption=f"Original Image (SNR: {snr_org:.2f})", use_column_width=True)
+                st.image(resize_image(gamma_corrected, width, height), caption=f"Gamma Correction (SNR: {snr_gamma:.2f})", use_column_width=True)
+                st.image(resize_image(shading_enhanced, width, height), caption=f"Shading-Based Enhancement (SNR: {snr_shading:.2f})", use_column_width=True)
+
+            with col2:
+                snr_clahe = return_snr(clahe_image)
+                snr_msr = return_snr(msr_image)
+                snr_homomorphic = return_snr(homomorphic_enhanced)
+
+                st.image(resize_image(clahe_image, width, height), caption=f"CLAHE (SNR: {snr_clahe:.2f})", use_column_width=True)
+                st.image(resize_image(msr_image, width, height), caption=f"Multi-Scale Retinex (SNR: {snr_msr:.2f})", use_column_width=True)
+                st.image(resize_image(homomorphic_enhanced, width, height), caption=f"Homomorphic Filtering (SNR: {snr_homomorphic:.2f})", use_column_width=True)
+
+            # Allow user to download any enhanced image
+            st.sidebar.download_button(
+                label="Download Gamma Corrected Image",
+                data=cv2.imencode('.jpg', gamma_corrected)[1].tobytes(),
+                file_name='gamma_corrected.jpg',
+                mime='image/jpeg'
+            )
+
+            st.sidebar.download_button(
+                label="Download CLAHE Image",
+                data=cv2.imencode('.jpg', clahe_image)[1].tobytes(),
+                file_name='clahe_image.jpg',
+                mime='image/jpeg'
+            )
+
+            st.sidebar.download_button(
+                label="Download MSR Image",
+                data=cv2.imencode('.jpg', msr_image)[1].tobytes(),
+                file_name='msr_image.jpg',
+                mime='image/jpeg'
+            )
+
+            st.sidebar.download_button(
+                label="Download Shading-Based Enhanced Image",
+                data=cv2.imencode('.jpg', shading_enhanced)[1].tobytes(),
+                file_name='shading_enhanced.jpg',
+                mime='image/jpeg'
+            )
+            
+            st.sidebar.download_button(
+                label="Download Homomorphic Enhanced Image",
+                data=cv2.imencode('.jpg', homomorphic_enhanced)[1].tobytes(),
+                file_name='homomorphic_enhanced.jpg',
+                mime='image/jpeg'
+            )
+
         else:
             enhanced_image = apply_enhancements(image.copy(), [t['type'] for t in st.session_state.techniques], [t['params'] for t in st.session_state.techniques])
-            compare_image(original_image, enhanced_image, label1="Original", label2="Enhanced")
-
+            snr1 = return_snr(original_image)
+            snr2 = return_snr(enhanced_image)
+            st.write(f"Original {snr1:.2f}")
+            st.write(f"Enhanced {snr2:.2f}")
+            image_comparison(
+                img1=original_image,
+                img2=enhanced_image,
+                label1="Original",
+                label2="Enhanced"
+            )
             # Allow downloading the enhanced image
             st.sidebar.download_button(
                 label="Download Enhanced Image",
